@@ -1,5 +1,9 @@
 # Ableton Live MCP Server
 
+## Changes
+I couldn't get 'get_track_names' to respond, made a few edits to the osc daemon and mcp server to send and parse track names properly.
+Also added in new tools from https://github.com/simonreitinger/ableton-live-mcp-server/tree/main
+
 ## 📌 Overview
 
 The **Ableton Live MCP Server** is a server implementing the
