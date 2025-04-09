@@ -36,9 +36,10 @@ class AbletonOSCDaemon:
             future = self.pending_responses[address]
             if not future.done():
                 future.set_result({
-                    'status': 'success',
-                    'address': address,
-                    'data': args
+                        "status": "success",
+                        "address": address,
+                        "args": args,
+                        "id": None
                 })
             del self.pending_responses[address]
             
@@ -61,6 +62,7 @@ class AbletonOSCDaemon:
         print(f"Ableton OSC Daemon listening on {self.socket_host}:{self.socket_port}")
         print(f"OSC Server receiving on {self.socket_host}:{self.receive_port}")
         print(f"Sending to Ableton on {self.ableton_host}:{self.ableton_port}")
+        print(f"and vibinn hAAder")
         
         async with server:
             await server.serve_forever()
@@ -80,13 +82,14 @@ class AbletonOSCDaemon:
                     message = json.loads(data.decode())
                     print(f"[RECEIVED MESSAGE] From {client_address}: {message}")
                     
-                    command = message.get('command')
-
+                    message_id = message.get('id')
+                    command = message.get('command') or message.get('method')
                     
                     if command == 'send_message':
+                        
                         # Extract OSC message details
-                        address = message.get('address')
-                        args = message.get('args', [])
+                        address = message.get('address') or message.get('params')['address']
+                        args = message.get('args', []) or message.get('params')['args']
                         
                         # For commands that expect responses, set up a future
                         if address.startswith(('/live/device/get', '/live/scene/get', '/live/view/get', '/live/clip/get', '/live/clip_slot/get', '/live/track/get', '/live/song/get', '/live/api/get', '/live/application/get', '/live/test', '/live/error')):
@@ -100,11 +103,14 @@ class AbletonOSCDaemon:
                             try:
                                 # Wait for response with timeout
                                 response = await asyncio.wait_for(future, timeout=5.0)
+                                response['id'] = str(message_id) # Add the message_id to the response
+                                # response['type'] = 'osc_response'
                                 print(f"[OSC RESPONSE] Received: {response}")
                                 writer.write(json.dumps(response).encode())
                             except asyncio.TimeoutError:
                                 response = {
                                     'status': 'error',
+                                    'id': message_id,
                                     'message': f'Timeout waiting for response to {address}'
                                 }
                                 print(f"[OSC TIMEOUT] {response}")
@@ -113,7 +119,8 @@ class AbletonOSCDaemon:
                         else:
                             # For commands that don't expect responses
                             self.osc_client.send_message(address, args)
-                            response = {'status': 'sent'}
+                            response = {'status': 'sent', 'id': message_id}
+                            print(f"[NO RESPONSE COMMAND] Received: {response}") #NEW
                             writer.write(json.dumps(response).encode())
                             
                     elif command == 'get_status':
@@ -124,12 +131,14 @@ class AbletonOSCDaemon:
                         }
                         print(f"[STATUS REQUEST] Responding with: {response}")
                         writer.write(json.dumps(response).encode())
+                    
                     else:
                         response = {'status': 'error', 'message': 'Unknown command'}
                         print(f"[UNKNOWN COMMAND] Received: {message}")
-                        writer.write(json.dumps(response).encode())
+                        writer.write(json.dumps(response).encode())           
                     
                     await writer.drain()
+                    print(f"[DRAINED]") #NEW
                     
                 except json.JSONDecodeError:
                     print(f"[JSON ERROR] Could not decode message: {data}")

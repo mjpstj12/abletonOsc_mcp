@@ -13,14 +13,14 @@ class AbletonClient:
         self.connected = False
         self.responses = {}  # Store futures keyed by (request_id)
         self.lock = asyncio.Lock()
-        self._request_id = 0  # compteur pour générer des ids uniques
+        self._request_id = 0  # counter to generate unique ids
         
-        # Task asynchrone pour lire les réponses
+        # Asynchronous task to read responses
         self.response_task = None
 
     async def start_response_reader(self):
         """Background task to read responses from the socket, potentially multiple messages."""
-        # On convertit self.sock en Streams asyncio
+        # Convert self.sock to asyncio Streams
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
         loop = asyncio.get_running_loop()
@@ -30,7 +30,7 @@ class AbletonClient:
             try:
                 data = await reader.read(4096)
                 if not data:
-                    # Connection close
+                    # Connection closed
                     break
 
                 try:
@@ -39,19 +39,20 @@ class AbletonClient:
                     print("Invalid JSON from daemon", file=sys.stderr)
                     continue
 
-                # Si c'est une réponse JSON-RPC
                 resp_id = msg.get('id')
-                if 'result' in msg or 'error' in msg:
-                    # Réponse à une requête
+
+                # If it's a JSON-RPC response
+                if 'result' in msg or 'error' in msg or 'status' in msg:
+                    # Response to a request
                     async with self.lock:
                         fut = self.responses.pop(resp_id, None)
                     if fut and not fut.done():
                         fut.set_result(msg)
                 else:
-                    # Sinon c'est un message "osc_response" ou un autre type
-                    # (Selon le code du daemon)
+                    # Otherwise it's an "osc_response" or another type
+                    # (According to the daemon code)
                     if msg.get('type') == 'osc_response':
-                        # On peut router selon l'adresse
+                        # We can route according to the address
                         address = msg.get('address')
                         args = msg.get('args')
                         await self.handle_osc_response(address, args)
@@ -63,8 +64,8 @@ class AbletonClient:
                 break
 
     async def handle_osc_response(self, address: str, args):
-        """Callback quand on reçoit un message de type OSC depuis Ableton."""
-        # Exemple simple : on pourrait faire un set_result sur un future
+        """Callback when receiving an OSC message from Ableton."""
+        # Simple example: we could do a set_result on a future
         print(f"OSC Notification from {address}: {args}", file=sys.stderr)
 
     def connect(self):
@@ -84,17 +85,17 @@ class AbletonClient:
 
     async def send_rpc_request(self, method: str, params: dict) -> dict:
         """
-        Envoie une requête JSON-RPC (method, params) et attend la réponse.
+        Send a JSON-RPC request (method, params) and wait for the response.
         """
         if not self.connected:
             if not self.connect():
                 return {'status': 'error', 'message': 'Not connected to daemon'}
 
-        # Génération d'un ID unique
+        # Generation of a unique ID
         self._request_id += 1
         request_id = str(self._request_id)
 
-        # Construit la requête JSON-RPC
+        # Build the JSON-RPC request
         request_obj = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -109,71 +110,34 @@ class AbletonClient:
         try:
             self.sock.sendall(json.dumps(request_obj).encode())
 
-            # Attend la réponse JSON-RPC
+            # Wait for the JSON-RPC response
             try:
-                msg = await asyncio.wait_for(future, timeout=5.0)
+                msg = await asyncio.wait_for(future, timeout=7.0)
+            
             except asyncio.TimeoutError:
                 async with self.lock:
                     self.responses.pop(request_id, None)
                 return {'status': 'error', 'message': 'Response timeout'}
 
-            # On check si on a un 'result' ou un 'error'
+            # We check if we have a 'result' or an 'error'
             if 'error' in msg:
                 return {
                     'status': 'error',
                     'code': msg['error'].get('code'),
                     'message': msg['error'].get('message')
                 }
+            
             else:
+                # For OSC responses, the data is directly in the message
                 return {
                     'status': 'ok',
-                    'result': msg.get('result')
+                    'result': msg
                 }
 
         except Exception as e:
             self.connected = False
             return {'status': 'error', 'message': str(e)}
-    """
-    def send_rpc_command_sync(self, method: str, params: dict) -> dict:
-        
-        # Variante synchrone pour juste envoyer le message
-        # et lire UNE réponse immédiatement (fonctionne si
-        # le daemon renvoie une unique réponse).
-        
-        if not self.connected:
-            if not self.connect():
-                return {'status': 'error', 'message': 'Not connected'}
 
-        # On envoie un ID, etc.
-        self._request_id += 1
-        request_id = str(self._request_id)
-
-        request_obj = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params
-        }
-        try:
-            self.sock.sendall(json.dumps(request_obj).encode())
-            resp_data = self.sock.recv(4096)
-            if not resp_data:
-                return {'status': 'error', 'message': 'No response'}
-
-            msg = json.loads(resp_data.decode())
-            if 'error' in msg:
-                return {
-                    'status': 'error',
-                    'code': msg['error'].get('code'),
-                    'message': msg['error'].get('message')
-                }
-            else:
-                return {'status': 'ok', 'result': msg.get('result')}
-
-        except Exception as e:
-            self.connected = False
-            return {'status': 'error', 'message': str(e)}
-    """
     async def close(self):
         """Close the connection."""
         if self.connected:
@@ -209,6 +173,7 @@ async def get_track_names(index_min: Optional[int] = None, index_max: Optional[i
         A formatted string containing track names
     """
     params = {}
+
     if index_min is not None and index_max is not None:
         params["address"] = "/live/song/get/track_names"
         params["args"] = [index_min, index_max]
@@ -217,18 +182,50 @@ async def get_track_names(index_min: Optional[int] = None, index_max: Optional[i
         params["args"] = []
 
     response = await ableton_client.send_rpc_request("send_message", params)
+   
     if response['status'] == 'ok':
-        track_names = response['result'].get('status')
-        # Ici, j'ai mis 'status' car dans le daemon, on renvoie "result": {"status":"sent"} ou autre
-        # Mais si vous modifiez le daemon pour retourner vraiment les noms de pistes, changez la structure correspondante.
+        # The response from send_rpc_request contains the OSC response directly in result
+        result = response.get('result', {})
+        if not result:
+            return "No tracks found"
+        track_names = result.get('args', [])
         if not track_names:
             return "No tracks found"
-        # Supposons qu'on reçoive un tableau de noms => adapter en conséquence
-        # track_names = ["Track1", "Track2", ...]
-        # ...
-        return f"Track Names: {track_names}"
+        return f"Track Names: {', '.join(track_names)}"
     else:
         return f"Error getting track names: {response.get('message', 'Unknown error')}"
+
+# customized tools for better translation
+
+@mcp.tool()
+async def create_midi_track(after_index: Optional[int] = -1) -> dict:
+    params = {"address": "/live/song/create_midi_track", "args": [after_index]}
+    response = await ableton_client.send_rpc_request("send_message", params)
+    return response
+
+@mcp.tool()
+async def create_audio_track(after_index: Optional[int] = -1) -> dict:
+    params = {"address": "/live/song/create_audio_track", "args": [after_index]}
+    response = await ableton_client.send_rpc_request("send_message", params)
+    return response
+
+@mcp.tool()
+async def delete_track(track_index: int) -> dict:
+    params = {"address": "/live/song/delete_track", "args": [track_index]}
+    response = await ableton_client.send_rpc_request("send_message", params)
+    return response
+
+@mcp.tool()
+async def create_clip_on_track(track_index: int, clip_index: int, length: int)  -> dict:
+    params = {"address": "/live/clip_slot/create_clip", "args": [track_index, clip_index, length]}
+    response = await ableton_client.send_rpc_request("send_message", params)
+    return response
+
+@mcp.tool()
+async def add_notes_to_clip(track_index: int, clip_id: int, pitch: int, start_at_beat: float, length_in_beats: Optional[float] = 4, velocity: Optional[int] = 100, mute: Optional[bool] = False) -> dict:
+    params = {"address": "/live/clip/add/notes", "args": [track_index, clip_id, pitch, start_at_beat, length_in_beats, velocity, mute]}
+    response = await ableton_client.send_rpc_request("send_message", params)
+    return response
 
 if __name__ == "__main__":
     try:
