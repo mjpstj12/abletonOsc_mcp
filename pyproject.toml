@@ -1,7 +1,7 @@
 [project]
-name = "ableton-live-mcp-server"
+name = "ableton_live_mcp_server_behemoth"
 version = "0.1.0"
-description = "Ableton Live MCP Server"
+description = "Ableton MCP control, now with double the amount of servers"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["fastmcp>=0.4.1", "python-osc>=1.9.3"]
+dependencies = ["fastmcp>=0.4.1", "python-osc>=1.9.3", "mcp[cli]>=1.3.0"]
